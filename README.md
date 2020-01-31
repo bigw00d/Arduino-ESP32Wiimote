@@ -52,6 +52,12 @@ void loop()
   BUTTON_ONE        = 0x0002,
   BUTTON_TWO        = 0x0001
 ```
+## Usage 
+
+1. To connect, press the 1 and 2 buttons on Wii Remote
+
+1. The LED1 will be on when they have finished connecting  
+<img width="30%" src="./remocon_led1_on.png" />  
 
 # Licence
 
