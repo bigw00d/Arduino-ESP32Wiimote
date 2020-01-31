@@ -1,6 +1,6 @@
 # ESP32Wiimote
 
-ESP32Wiimote is a library that connects with a Nintendo Wii remote.
+ESP32Wiimote is a library that connects with a Wii remote.
 
 ## Installation
 1. Download the zip file
