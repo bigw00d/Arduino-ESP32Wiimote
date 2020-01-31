@@ -13,7 +13,6 @@ void loop()
   wiimote.task();
   if (wiimote.available() > 0) {
       uint16_t button = wiimote.getButtonState();
-      // Serial.printf("button:%d\n", button);
       Serial.printf("%04x\n", button);
       if (button == ESP32Wiimote::BUTTON_A) {
         Serial.println("A button");
@@ -21,4 +20,3 @@ void loop()
   }
   delay(10);
 }
-
