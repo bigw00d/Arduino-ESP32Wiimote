@@ -2,8 +2,14 @@
 
 ESP32Wiimote is a Arduino library that connects with a Wii remote.
 
+## Requirement
+
+- [ESP32 dev board](https://www.switch-science.com/catalog/3210/)
+- Arduino IDE (Version: 1.8.5)
+- Wii Remote (RVL-CNT-01)
+
 ## Installation
-1. Download the zip file
+1. Download the zip file.
 2. Move the zip file to your libraries directory.
 3. In the Arduino IDE, navigate to Sketch > Include Library > Add .ZIP Library.
 4. Select the zip file.
