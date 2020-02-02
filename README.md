@@ -65,6 +65,6 @@ void loop()
 1. The LED1 will be on when they have finished connecting  
 <img width="30%" src="./remocon_led1_on.png" />  
 
-# Licence
+## Licence
 
    see [LICENSE.md](./LICENSE.md) 
