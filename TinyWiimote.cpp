@@ -251,12 +251,6 @@ static void sendHciPacket(uint8_t *data, size_t len) {
     _hciInterface.hci_send_packet(data, len);
 }
 
-// static esp_err_t handleRecvPacket(uint8_t *data, size_t len) {
-//     VERBOSE_PRINTLN("handleRecvPacket");
-//     _hciInterface.hci_recv_packet(data, len);
-//     return ESP_OK;
-// }
-
 static int findItemsInArray(uint8_t* array, size_t arraySize, size_t itemLength, uint8_t* data, size_t dataLength, size_t alignment) {
   for(int i=0; i<arraySize; i++){
     if(memcmp(array + (itemLength*i) + alignment, data, dataLength) == 0){
