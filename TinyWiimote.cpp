@@ -18,13 +18,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include "nvs.h"
-#include "nvs_flash.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "Arduino.h"
-#include "esp_bt.h"
-#include <HardwareSerial.h>
 
 #include "time.h"
 #include "sys/time.h"
@@ -34,6 +27,7 @@
 #define WIIMOTE_VERBOSE 0
 
 #if WIIMOTE_VERBOSE
+#include <HardwareSerial.h> // for Arduino
 #define VERBOSE_PRINT(...) Serial.printf(__VA_ARGS__)
 #define VERBOSE_PRINTLN(...) Serial.println(__VA_ARGS__)
 #else
@@ -231,14 +225,14 @@ static uint16_t make_cmd_create_connection(uint8_t *buf, struct bd_addr_t bdAddr
 
 #define L2CAP_HEADER_LEN (4) //Length + Channel ID
 
-static uint16_t make_l2cap_packet(uint8_t *buf, uint16_t channelID, uint8_t *data, uint16_t len){
+static uint16_t make_l2cap_packet(uint8_t *buf, uint16_t channelID, uint8_t *data, uint16_t len) {
     UINT16_TO_STREAM (buf, len);
     UINT16_TO_STREAM (buf, channelID); // 0x0001=Signaling channel
     ARRAY_TO_STREAM (buf, data, len);
     return L2CAP_HEADER_LEN + len;
 }
 
-static uint16_t make_acl_l2cap_packet(uint8_t *buf, uint16_t ch, uint8_t pbf, uint8_t bf, uint16_t channelID, uint8_t *data, uint8_t len){
+static uint16_t make_acl_l2cap_packet(uint8_t *buf, uint16_t ch, uint8_t pbf, uint8_t bf, uint16_t channelID, uint8_t *data, uint8_t len) {
   uint8_t* l2cap_buf = buf + HCI_H4_ACL_PREAMBLE_SIZE;
   uint16_t l2capLen = make_l2cap_packet(l2cap_buf, channelID, data, len);
 
@@ -250,54 +244,14 @@ static uint16_t make_acl_l2cap_packet(uint8_t *buf, uint16_t ch, uint8_t pbf, ui
   return HCI_H4_ACL_PREAMBLE_SIZE + l2capLen;
 }
 
-/**
- * Queue
- */
-typedef struct {
-        size_t len;
-        uint8_t data[];
-} queuedata_t;
-#define RX_QUEUE_SIZE 32
-#define TX_QUEUE_SIZE 32
-static xQueueHandle rxQueue = NULL;
-static xQueueHandle txQueue = NULL;
+TwHciInterface _hciInterface;
 
-static void createQueue(){
-  txQueue = xQueueCreate(TX_QUEUE_SIZE, sizeof(queuedata_t*));
-  if (txQueue == NULL){
-    VERBOSE_PRINTLN("xQueueCreate(txQueue) failed");
-    return;
-  }
-  rxQueue = xQueueCreate(RX_QUEUE_SIZE, sizeof(queuedata_t*));
-  if (rxQueue == NULL){
-    VERBOSE_PRINTLN("xQueueCreate(rxQueue) failed");
-    return;
-  }
+static void sendHciPacket(uint8_t *data, size_t len) {
+    VERBOSE_PRINTLN("sendHciPacket");
+    _hciInterface.hci_send_packet(data, len);
 }
 
-static esp_err_t sendQueueData(xQueueHandle queue, uint8_t *data, size_t len){
-    VERBOSE_PRINTLN("sendQueueData");
-    if(!data || !len){
-        VERBOSE_PRINTLN("no data");
-        return ESP_OK;
-    }
-    queuedata_t * queuedata = (queuedata_t*)malloc(sizeof(queuedata_t) + len);
-    if(!queuedata){
-        VERBOSE_PRINTLN("malloc failed");
-        return ESP_FAIL;
-    }
-    queuedata->len = len;
-    memcpy(queuedata->data, data, len);
-    if (xQueueSend(queue, &queuedata, portMAX_DELAY) != pdPASS) {
-        VERBOSE_PRINTLN("xQueueSend failed");
-        free(queuedata);
-        return ESP_FAIL;
-    }
-    return ESP_OK;
-}
-
-
-static int findItemsInArray(uint8_t* array, size_t arraySize, size_t itemLength, uint8_t* data, size_t dataLength, size_t alignment){
+static int findItemsInArray(uint8_t* array, size_t arraySize, size_t itemLength, uint8_t* data, size_t dataLength, size_t alignment) {
   for(int i=0; i<arraySize; i++){
     if(memcmp(array + (itemLength*i) + alignment, data, dataLength) == 0){
       return i;
@@ -309,7 +263,7 @@ static int findItemsInArray(uint8_t* array, size_t arraySize, size_t itemLength,
 #define FORMAT_HEX_MAX_BYTES 30
 static char formatHexBuffer[FORMAT_HEX_MAX_BYTES*3 + 4];
 
-static char* format2Hex(uint8_t* data, uint16_t len){
+char* format2Hex(uint8_t* data, uint16_t len) {
     for(uint16_t i=0; i<len && i<FORMAT_HEX_MAX_BYTES; i++){
         sprintf(formatHexBuffer+3*i, "%02X ", data[i]);
         formatHexBuffer[3*i+3] = '\0';
@@ -332,17 +286,17 @@ static char* format2Hex(uint8_t* data, uint16_t len){
 static int connectedDeviceListNum = 0;
 #define SCANNED_DEVICE_LIST_SIZE 16
 static connected_device_t connectedDeviceList[SCANNED_DEVICE_LIST_SIZE];
-static int findConnectedDevice(struct bd_addr_t bdAddr){
+static int findConnectedDevice(struct bd_addr_t bdAddr) {
   return findItemsInArray((uint8_t*)connectedDeviceList, connectedDeviceListNum, sizeof(connected_device_t), (uint8_t*)&bdAddr.addr, BD_ADDR_LEN, 0);
 }
-static int connected_device_add(struct connected_device_t connected_device){
+static int connected_device_add(struct connected_device_t connected_device) {
   if(SCANNED_DEVICE_LIST_SIZE == connectedDeviceListNum){
     return -1;
   }
   connectedDeviceList[connectedDeviceListNum++] = connected_device;
   return connectedDeviceListNum;
 }
-static void connected_device_clear(void){
+static void connected_device_clear(void) {
   connectedDeviceListNum = 0;
 }
 
@@ -356,34 +310,39 @@ struct l2cap_connection_t {
 static int l2capConnectionSize = 0;
 #define L2CAP_CONNECTION_LIST_SIZE 8
 static l2cap_connection_t l2capConnectionList[L2CAP_CONNECTION_LIST_SIZE];
-static int l2capFindConnection(uint16_t ch){
+static int l2capFindConnection(uint16_t ch) {
   return findItemsInArray((uint8_t*)l2capConnectionList, l2capConnectionSize, sizeof(l2cap_connection_t), (uint8_t*)&ch, sizeof(uint16_t), 0);
 }
-static int l2cap_connection_add(struct l2cap_connection_t connection){
+static int l2capAddConnection(struct l2cap_connection_t connection) {
   if(L2CAP_CONNECTION_LIST_SIZE == l2capConnectionSize){
     return -1;
   }
   l2capConnectionList[l2capConnectionSize++] = connection;
   return l2capConnectionSize;
 }
-static void l2cap_connection_clear(void){
+static void l2capClearConnection(void) {
   l2capConnectionSize = 0;
 }
 
 static uint8_t tmpQueueData[256];
 
-static void resetDevice(void){
+static void resetDevice(void) {
   VERBOSE_PRINTLN("resetDevice");
   connected_device_clear();
-  l2cap_connection_clear();
+  l2capClearConnection();
   uint16_t len = make_cmd_reset(tmpQueueData);
-  sendQueueData(txQueue, tmpQueueData, len);
+  sendHciPacket(tmpQueueData, len);
+}
+
+void TinyWiimoteResetDevice(void) {
+  resetDevice();
+  deviceInited = true;
 }
 
 /**
  * HCI Event Handler
  */
-static void handleCommandCompleteEvent(uint8_t len, uint8_t* data){
+static void handleCommandCompleteEvent(uint8_t len, uint8_t* data) {
     VERBOSE_PRINTLN("handleCommandCompleteEvent");
     uint16_t cmdOpcode = (uint16_t)data[1] | ((uint16_t)data[2] << 8);
 
@@ -392,7 +351,7 @@ static void handleCommandCompleteEvent(uint8_t len, uint8_t* data){
         if(data[3]==0x00){ // OK
           VERBOSE_PRINTLN("reset succeeded");
           uint16_t len = make_cmd_read_bd_addr(tmpQueueData);
-          sendQueueData(txQueue, tmpQueueData, len);
+          sendHciPacket(tmpQueueData, len);
           VERBOSE_PRINTLN("queued read_bd_addr");
         }else{
           VERBOSE_PRINTLN("reset failed");
@@ -404,7 +363,7 @@ static void handleCommandCompleteEvent(uint8_t len, uint8_t* data){
           char name[] = "ESP32-BT-L2CAP";
           VERBOSE_PRINT("sizeof(name)=%d", sizeof(name));
           uint16_t len = make_cmd_write_local_name(tmpQueueData, (uint8_t*)name, sizeof(name));
-          sendQueueData(txQueue, tmpQueueData, len);
+          sendHciPacket(tmpQueueData, len);
           VERBOSE_PRINTLN("queued write_local_name");
         }else{
           VERBOSE_PRINTLN("read_bd_addr failed");
@@ -415,7 +374,7 @@ static void handleCommandCompleteEvent(uint8_t len, uint8_t* data){
           VERBOSE_PRINTLN("write_local_name succeeded");
           uint8_t cod[3] = {0x04, 0x05, 0x00};
           uint16_t len = make_cmd_write_class_of_device(tmpQueueData, cod);
-          sendQueueData(txQueue, tmpQueueData, len);
+          sendHciPacket(tmpQueueData, len);
           VERBOSE_PRINTLN("queued write_class_of_device");
         }else{
           VERBOSE_PRINTLN("write_local_name failed");
@@ -425,7 +384,7 @@ static void handleCommandCompleteEvent(uint8_t len, uint8_t* data){
         if(data[3] == 0x00){ // OK
           VERBOSE_PRINTLN("write_class_of_device succeeded");
           uint16_t len = make_cmd_write_scan_enable(tmpQueueData, 3);
-          sendQueueData(txQueue, tmpQueueData, len);
+          sendHciPacket(tmpQueueData, len);
           VERBOSE_PRINTLN("queued write_scan_enable");
         }else{
           VERBOSE_PRINTLN("write_class_of_device failed");
@@ -437,7 +396,7 @@ static void handleCommandCompleteEvent(uint8_t len, uint8_t* data){
 
           connected_device_clear();
           uint16_t len = make_cmd_inquiry(tmpQueueData, 0x9E8B33, 0x05/*0x30*/, 0x00);
-          sendQueueData(txQueue, tmpQueueData, len);
+          sendHciPacket(tmpQueueData, len);
           VERBOSE_PRINTLN("queued inquiry");
         }else{
           VERBOSE_PRINTLN("write_scan_enable failed.");
@@ -456,7 +415,7 @@ static void handleCommandCompleteEvent(uint8_t len, uint8_t* data){
     }
 }
 
-static void handleCommandStatusEvent(uint8_t len, uint8_t* data){
+static void handleCommandStatusEvent(uint8_t len, uint8_t* data) {
     VERBOSE_PRINTLN("handleCommandStatusEvent");
     uint16_t cmdOpcode = (uint16_t)data[2] | ((uint16_t)data[3] << 8);
 
@@ -489,13 +448,13 @@ static void handleCommandStatusEvent(uint8_t len, uint8_t* data){
 
 }
 
-static void handleInquiryCompleteEvent(uint8_t len, uint8_t* data){
+static void handleInquiryCompleteEvent(uint8_t len, uint8_t* data) {
     uint8_t status = data[0];
     VERBOSE_PRINT("inquiry_complete status=%02X", status);
     resetDevice();
 }
 
-static void handleInquiryResultEvent(uint8_t len, uint8_t* data){
+static void handleInquiryResultEvent(uint8_t len, uint8_t* data) {
     uint8_t num = data[0];
     VERBOSE_PRINTLN("inquiry_result");
 
@@ -523,7 +482,7 @@ static void handleInquiryResultEvent(uint8_t len, uint8_t* data){
         if(0<=idx){
             if(data[pos+9]==0x04 && data[pos+10]==0x25 && data[pos+11]==0x00){ // Filter for Wiimote [04 25 00] 
                 uint16_t len = make_cmd_remote_name_request(tmpQueueData, connected_device.bdAddr, connected_device.psrm, connected_device.clkofs);
-                sendQueueData(txQueue, tmpQueueData, len);
+                sendHciPacket(tmpQueueData, len);
                 //log_d("    connected_list_add n=%d", n);
                 VERBOSE_PRINTLN("queued remote_name_request");
             }else{
@@ -538,7 +497,7 @@ static void handleInquiryResultEvent(uint8_t len, uint8_t* data){
     }
 }
 
-static void handleRemoteNameRequestCompleteEvent(uint8_t len, uint8_t* data){
+static void handleRemoteNameRequestCompleteEvent(uint8_t len, uint8_t* data) {
     uint8_t status = data[0];
     VERBOSE_PRINT("remote_name_request_complete status=%02X", status);
     struct bd_addr_t bdAddr;
@@ -552,7 +511,7 @@ static void handleRemoteNameRequestCompleteEvent(uint8_t len, uint8_t* data){
     if(0<=idx && strcmp("Nintendo RVL-CNT-01", name)==0){
         {
             uint16_t len = make_cmd_inquiry_cancel(tmpQueueData);
-            sendQueueData(txQueue, tmpQueueData, len);
+            sendHciPacket(tmpQueueData, len);
             VERBOSE_PRINTLN("queued inquiry_cancel");
         }
 
@@ -561,7 +520,7 @@ static void handleRemoteNameRequestCompleteEvent(uint8_t len, uint8_t* data){
         uint16_t pt = 0x0008;
         uint8_t ars = 0x00;
         uint16_t len = make_cmd_create_connection(tmpQueueData, connected_device.bdAddr, pt, connected_device.psrm, connected_device.clkofs, ars);
-        sendQueueData(txQueue, tmpQueueData, len);
+        sendHciPacket(tmpQueueData, len);
         VERBOSE_PRINTLN("queued create_connection");
     }
 }
@@ -569,7 +528,7 @@ static void handleRemoteNameRequestCompleteEvent(uint8_t len, uint8_t* data){
 #define L2CAP_PAYLOAD_MAX_LEN (64)
 uint8_t payload[L2CAP_PAYLOAD_MAX_LEN];
 
-static void l2capConnect(uint16_t ch, uint16_t psm, uint16_t cid){
+static void l2capConnect(uint16_t ch, uint16_t psm, uint16_t cid) {
     uint8_t  pbf = 0b10; // Packet Boundary Flag
     uint8_t  bf = 0b00; // Broadcast Flag
     uint16_t channelID           = 0x0001;
@@ -589,11 +548,11 @@ static void l2capConnect(uint16_t ch, uint16_t psm, uint16_t cid){
     payload[posi++] = (uint8_t)(cid >> 8);
     uint16_t dataLen = posi;
     uint16_t len = make_acl_l2cap_packet(tmpQueueData, ch, pbf,  bf, channelID, payload, dataLen);
-    sendQueueData(txQueue, tmpQueueData, len);
+    sendHciPacket(tmpQueueData, len);
     VERBOSE_PRINTLN("queued acl_l2cap_single_packet(CONNECTION REQUEST)");
 }
 
-static void handleConnectionCompleteEvent(uint8_t len, uint8_t* data){
+static void handleConnectionCompleteEvent(uint8_t len, uint8_t* data) {
     uint8_t status = data[0];
     VERBOSE_PRINT("connection_complete status=%02X", status);
 
@@ -611,7 +570,7 @@ static void handleConnectionCompleteEvent(uint8_t len, uint8_t* data){
     l2capConnect(ch, 0x0013, 0x0045);
 }
 
-static void handleDisconnectionCompleteEvent(uint8_t len, uint8_t* data){
+static void handleDisconnectionCompleteEvent(uint8_t len, uint8_t* data) {
     uint8_t status = data[0];
     VERBOSE_PRINT("disconnection_complete status=%02X  ", status);
 
@@ -625,7 +584,7 @@ static void handleDisconnectionCompleteEvent(uint8_t len, uint8_t* data){
     resetDevice();
 }
 
-static void handleHciEvent(uint8_t event_code, uint8_t len, uint8_t* data){
+void handleHciEvent(uint8_t event_code, uint8_t len, uint8_t* data) {
     VERBOSE_PRINTLN("handleHciEvent");
     if(event_code != HCI_INQUIRY_RESULT_EVT){ // suppress HCI_INQUIRY_RESULT_EVT
       VERBOSE_PRINT("EVENT code=%02X len=%d data=%s", event_code, len, format2Hex(data, len));
@@ -661,7 +620,7 @@ static void handleHciEvent(uint8_t event_code, uint8_t len, uint8_t* data){
 }
 
 
-static void handleL2capConnectionResponse(uint16_t ch, uint8_t* data){
+static void handleL2capConnectionResponse(uint16_t ch, uint8_t* data) {
   uint8_t identifier       =  data[1];
   // uint16_t len             = (data[3] << 8) | data[2];
   uint16_t dstCID = (data[5] << 8) | data[4];
@@ -680,7 +639,7 @@ static void handleL2capConnectionResponse(uint16_t ch, uint8_t* data){
       struct l2cap_connection_t connection;
       connection.ch = ch;
       connection.remoteCID = dstCID;
-      int idx = l2cap_connection_add(connection);
+      int idx = l2capAddConnection(connection);
       if(idx == -1){
         VERBOSE_PRINTLN("l2cap connection failed");
         return;
@@ -710,12 +669,12 @@ static void handleL2capConnectionResponse(uint16_t ch, uint8_t* data){
 
       uint16_t dataLen = posi;
       uint16_t len = make_acl_l2cap_packet(tmpQueueData, ch, pbf,  bf, channelID, payload, dataLen);
-      sendQueueData(txQueue, tmpQueueData, len);
+      sendHciPacket(tmpQueueData, len);
       VERBOSE_PRINTLN("queued acl_l2cap_single_packet(CONFIGURATION REQUEST)");
   }
 }
 
-static void handleL2capConfigurationResponse(uint16_t ch, uint8_t* data){
+static void handleL2capConfigurationResponse(uint16_t ch, uint8_t* data) {
   uint8_t identifier       =  data[1];
   uint16_t len             = (data[3] << 8) | data[2];
   uint16_t cid      = (data[5] << 8) | data[4];
@@ -732,7 +691,7 @@ static void handleL2capConfigurationResponse(uint16_t ch, uint8_t* data){
   VERBOSE_PRINT("config          = %s", format2Hex(data+10, len-6));
 }
 
-static void handleL2capConfigurationRequest(uint16_t ch, uint8_t* data){
+static void handleL2capConfigurationRequest(uint16_t ch, uint8_t* data) {
   uint8_t identifier       =  data[1];
   uint16_t len             = (data[3] << 8) | data[2];
   uint16_t dstCID = (data[5] << 8) | data[4];
@@ -787,14 +746,14 @@ static void handleL2capConfigurationRequest(uint16_t ch, uint8_t* data){
     payload[posi++] = (uint8_t)(mtu & 0xFF);
     payload[posi++] = (uint8_t)(mtu >> 8);
 
-    uint16_t dataLen = posi++;
+    uint16_t dataLen = posi;
     uint16_t len = make_acl_l2cap_packet(tmpQueueData, ch, pbf,  bf, channelID, payload, dataLen);
-    sendQueueData(txQueue, tmpQueueData, len);
+    sendHciPacket(tmpQueueData, len);
     VERBOSE_PRINTLN("queued acl_l2cap_single_packet(CONFIGURATION RESPONSE)");
   }
 }
 
-static void setPlayerLEDs(uint16_t ch, uint8_t leds){
+static void setPlayerLEDs(uint16_t ch, uint8_t leds) {
   int idx = l2capFindConnection(ch);
   struct l2cap_connection_t connection = l2capConnectionList[idx];
 
@@ -811,7 +770,7 @@ static void setPlayerLEDs(uint16_t ch, uint8_t leds){
   payload[posi++] = (uint8_t)(leds << 4); // LL:controls the four LEDs
   uint16_t dataLen = posi;
   uint16_t len = make_acl_l2cap_packet(tmpQueueData, ch, pbf, bf, channelID, payload, dataLen);
-  sendQueueData(txQueue, tmpQueueData, len);
+  sendHciPacket(tmpQueueData, len);
   VERBOSE_PRINT("queued acl_l2cap_single_packet(Set LEDs)");
 }
 
@@ -832,7 +791,7 @@ static uint8_t getAddrSpace(int as)
 #define OFFSET_EEP_DATA (7)
 #define SIZE_EEP_DATA (16)
 
-static void writingEEPROM(uint16_t ch, int as, uint32_t offset, const uint8_t* eepData, uint8_t eepLen){
+static void writingEEPROM(uint16_t ch, int as, uint32_t offset, const uint8_t* eepData, uint8_t eepLen) {
   int idx = l2capFindConnection(ch);
   struct l2cap_connection_t connection = l2capConnectionList[idx];
 
@@ -858,11 +817,11 @@ static void writingEEPROM(uint16_t ch, int as, uint32_t offset, const uint8_t* e
 
   uint16_t dataLen = posi;
   uint16_t len = make_acl_l2cap_packet(tmpQueueData, ch, pbf, bf, channelID, payload, dataLen);
-  sendQueueData(txQueue, tmpQueueData, len);
+  sendHciPacket(tmpQueueData, len);
   VERBOSE_PRINTLN("queued writingEEPROM");
 }
 
-static void readingEEPROM(uint16_t ch, int as, uint32_t offset, uint16_t size){
+static void readingEEPROM(uint16_t ch, int as, uint32_t offset, uint16_t size) {
   int idx = l2capFindConnection(ch);
   struct l2cap_connection_t connection = l2capConnectionList[idx];
 
@@ -885,11 +844,11 @@ static void readingEEPROM(uint16_t ch, int as, uint32_t offset, uint16_t size){
 
   uint16_t dataLen = posi;
   uint16_t len = make_acl_l2cap_packet(tmpQueueData, ch, pbf, bf, channelID, payload, dataLen);
-  sendQueueData(txQueue, tmpQueueData, len);
+  sendHciPacket(tmpQueueData, len);
   VERBOSE_PRINTLN("queued readingEEPROM");
 }
 
-static void setDataReportingMode(uint16_t ch, uint8_t mode, bool continuous){
+static void setDataReportingMode(uint16_t ch, uint8_t mode, bool continuous) {
   int idx = l2capFindConnection(ch);
   struct l2cap_connection_t connection = l2capConnectionList[idx];
 
@@ -909,7 +868,7 @@ static void setDataReportingMode(uint16_t ch, uint8_t mode, bool continuous){
 
   uint16_t dataLen = posi;
   uint16_t len = make_acl_l2cap_packet(tmpQueueData, ch, pbf, bf, channelID, payload, dataLen);
-  sendQueueData(txQueue, tmpQueueData, len);
+  sendHciPacket(tmpQueueData, len);
   VERBOSE_PRINTLN("queued setDataReportingMode");
 }
 
@@ -920,7 +879,7 @@ enum {
     REPORT_STATE_WAIT_READ_RESPONSE,
 };
 
-static void handleExtensionControllerReports(uint16_t ch, uint16_t channelID, uint8_t* data, uint16_t len){
+static void handleExtensionControllerReports(uint16_t ch, uint16_t channelID, uint8_t* data, uint16_t len) {
   static int controllerReportState = REPORT_STATE_INIT;
 
   switch(controllerReportState){
@@ -991,11 +950,11 @@ struct recv_data_rb {
 };
 recv_data_rb receivedDataRb;
 #define RECIEVED_DATA_MAX_NUM     (5)
-twii_recv_data_st receivedData[RECIEVED_DATA_MAX_NUM];
+TinyWiimoteData receivedData[RECIEVED_DATA_MAX_NUM];
 
 void putWiimoteReceivedData(uint8_t number, uint8_t* data, uint8_t len) {
   if(receivedDataRb.cnt < RECIEVED_DATA_MAX_NUM) {
-    twii_recv_data_st *target = &(receivedData[receivedDataRb.wp]);
+    TinyWiimoteData *target = &(receivedData[receivedDataRb.wp]);
     memcpy(target->data, data, len);
     target->number = number;
     target->len = len;
@@ -1005,14 +964,14 @@ void putWiimoteReceivedData(uint8_t number, uint8_t* data, uint8_t len) {
   VERBOSE_PRINTLN("");
 }
 
-static void handleReport(uint8_t* data, uint16_t len){
+static void handleReport(uint8_t* data, uint16_t len) {
   VERBOSE_PRINT("REPORT len=%d data=%s", len, format2Hex(data, len));
   uint8_t idx = 0; //only supports one wiimote
   putWiimoteReceivedData(idx, data, len);
 }
 
 static void handleL2capData(uint16_t ch, uint16_t channelID, uint8_t* data, uint16_t len) {
-  VERBOSE_PRINTLN("handleHciEvent");
+  VERBOSE_PRINTLN("handleL2capData");
   VERBOSE_PRINT("data[0]=%02X\n", data[0]);
 
   switch(data[0]) {
@@ -1044,7 +1003,7 @@ static void handleL2capData(uint16_t ch, uint16_t channelID, uint8_t* data, uint
 
 }
 
-static void handleAclData(uint8_t* data, size_t len){
+void handleAclData(uint8_t* data, size_t len) {
     VERBOSE_PRINT("handleAclData\n");
     if(!wiimoteConnected){
       VERBOSE_PRINT("len=%d data=%s\n", len, format2Hex(data, len));
@@ -1068,35 +1027,30 @@ static void handleAclData(uint8_t* data, size_t len){
     handleL2capData(ch, channelID, data + 8, l2capLen);
 }
 
-void notifyHostSendAvailable(void){
-  VERBOSE_PRINT("notifyHostSendAvailable\n");
-  if(!deviceInited){
-    resetDevice();
-    deviceInited = true;
-  }
+void handleHciData(uint8_t* data, size_t len) {
+    switch(data[0]){
+    case H4_TYPE_EVENT:
+      handleHciEvent(data[1], data[2], data+3);
+      break;
+    case H4_TYPE_ACL:
+      handleAclData(data+1, len-1);
+      break;
+    default:
+      VERBOSE_PRINT("UNKNOWN EVENT");
+      VERBOSE_PRINT("len=%d data=%s", len, format2Hex(data, len));
+    }
 }
 
-int notifyHostRecv(uint8_t *data, uint16_t len){
-  VERBOSE_PRINT("notifyHostRecv:");
-  for (int i = 0; i < len; i++)
-  {
-    VERBOSE_PRINT(" %02x", data[i]);
-  }
-  VERBOSE_PRINTLN("");
-
-  if(ESP_OK == sendQueueData(rxQueue, data, len)){
-    return ESP_OK;
-  }else{
-    return ESP_FAIL;
-  }
+bool TinyWiimoteDeviceIsInited(void) {
+  return deviceInited;
 }
 
-int TinyWiimoteAvailable(){
+int TinyWiimoteAvailable() {
   return receivedDataRb.cnt;
 }
 
-twii_recv_data_st TinyWiimoteRead(){
-  twii_recv_data_st target;
+TinyWiimoteData TinyWiimoteRead() {
+  TinyWiimoteData target;
   target.number = 0;
   target.len = 0;
   if(receivedDataRb.cnt > 0) {
@@ -1107,70 +1061,9 @@ twii_recv_data_st TinyWiimoteRead(){
   return target;
 }
 
-static const esp_vhci_host_callback_t vhci_callback = {
-  notifyHostSendAvailable,
-  notifyHostRecv
-};
-
-void TinyWiimoteInit(){
+void TinyWiimoteInit(TwHciInterface hciInterface) {
     receivedDataRb.cnt = 0;
     receivedDataRb.wp = 0;
     receivedDataRb.rp = 0;
-    createQueue();
-
-    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    if (!btStart()) {
-        Serial.printf( "btStart() failed\n");
-        return;
-    }
-
-    esp_err_t ret;
-    if ((ret = esp_vhci_host_register_callback(&vhci_callback)) != ESP_OK) {
-        return;
-    }
-
+    _hciInterface = hciInterface;
 }
-
-static void handleTxQueue() {
-  if(uxQueueMessagesWaiting(txQueue)){
-    bool ok = esp_vhci_host_check_send_available();
-    VERBOSE_PRINT("esp_vhci_host_check_send_available=%d", ok);
-    if(ok){
-      queuedata_t *queuedata = NULL;
-      if(xQueueReceive(txQueue, &queuedata, 0) == pdTRUE){
-        esp_vhci_host_send_packet(queuedata->data, queuedata->len);
-        VERBOSE_PRINT("SEND => %s", format2Hex(queuedata->data, queuedata->len));
-        free(queuedata);
-      }
-    }
-  }
-}
-
-static void handleRxQueue() {
-  if(uxQueueMessagesWaiting(rxQueue)){
-    queuedata_t *queuedata = NULL;
-    if(xQueueReceive(rxQueue, &queuedata, 0) == pdTRUE){
-      switch(queuedata->data[0]){
-      case H4_TYPE_EVENT:
-        handleHciEvent(queuedata->data[1], queuedata->data[2], queuedata->data+3);
-        break;
-      case H4_TYPE_ACL:
-        handleAclData(queuedata->data+1, queuedata->len-1);
-        break;
-      default:
-        Serial.print("UNKNOWN EVENT");
-        VERBOSE_PRINT("len=%d data=%s", queuedata->len, format2Hex(queuedata->data, queuedata->len));
-      }
-      free(queuedata);
-    }
-  }
-}
-
-void TinyWiimoteHandle(){
-  if(!btStarted()){
-    return;
-  }
-  handleTxQueue();
-  handleRxQueue();
-}
-

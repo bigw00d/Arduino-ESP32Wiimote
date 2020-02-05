@@ -15,6 +15,9 @@
 #ifndef __ESP32_WIIMOTE_H__
 #define __ESP32_WIIMOTE_H__
 
+#include "esp_bt.h"
+#include "TinyWiimote.h"
+
 class ESP32Wiimote
 {
 public:
@@ -40,7 +43,25 @@ public:
   int available(void);
   uint16_t getButtonState(void);
 
-// private:
+private:
+
+  typedef struct {
+          size_t len;
+          uint8_t data[];
+  } queuedata_t;
+
+  static const TwHciInterface tinywii_hci_interface;
+  static esp_vhci_host_callback_t vhci_callback;
+  static xQueueHandle txQueue;
+  static xQueueHandle rxQueue;
+
+  static void createQueue(void);
+  static void handleTxQueue(void);
+  static void handleRxQueue(void);
+  static esp_err_t sendQueueData(xQueueHandle queue, uint8_t *data, size_t len);
+  static void notifyHostSendAvailable(void);
+  static int notifyHostRecv(uint8_t *data, uint16_t len);
+  static void hciHostSendPacket(uint8_t *data, size_t len);
 
 };
 
