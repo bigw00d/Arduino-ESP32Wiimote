@@ -1003,21 +1003,6 @@ static void handleL2capData(uint16_t ch, uint16_t channelID, uint8_t* data, uint
 
 }
 
-
-void handleHciData(uint8_t* data, size_t len) {
-    switch(data[0]){
-    case H4_TYPE_EVENT:
-      handleHciEvent(data[1], data[2], data+3);
-      break;
-    case H4_TYPE_ACL:
-      handleAclData(data+1, len-1);
-      break;
-    default:
-      VERBOSE_PRINT("UNKNOWN EVENT");
-      VERBOSE_PRINT("len=%d data=%s", len, format2Hex(data, len));
-    }
-}
-
 void handleAclData(uint8_t* data, size_t len) {
     VERBOSE_PRINT("handleAclData\n");
     if(!wiimoteConnected){
@@ -1040,6 +1025,20 @@ void handleAclData(uint8_t* data, size_t len) {
     uint16_t channelID           =  (data[7] << 8) | data[6];
 
     handleL2capData(ch, channelID, data + 8, l2capLen);
+}
+
+void handleHciData(uint8_t* data, size_t len) {
+    switch(data[0]){
+    case H4_TYPE_EVENT:
+      handleHciEvent(data[1], data[2], data+3);
+      break;
+    case H4_TYPE_ACL:
+      handleAclData(data+1, len-1);
+      break;
+    default:
+      VERBOSE_PRINT("UNKNOWN EVENT");
+      VERBOSE_PRINT("len=%d data=%s", len, format2Hex(data, len));
+    }
 }
 
 bool TinyWiimoteDeviceIsInited(void) {

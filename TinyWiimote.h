@@ -26,17 +26,7 @@ struct TinyWiimoteData {
 
 typedef struct tinywii_device_callback {
     void (*hci_send_packet)(uint8_t *data, size_t len);
-    void (*hci_recv_packet)(uint8_t *data, size_t len);
 } TwHciInterface;
-
-// typedef struct {
-//         size_t len;
-//         uint8_t data[];
-// } queuedata_t;
-// #define RX_QUEUE_SIZE 32
-// #define TX_QUEUE_SIZE 32
-// extern xQueueHandle rxQueue;
-// extern xQueueHandle txQueue;
 
 void TinyWiimoteInit(TwHciInterface hciInterface);
 int TinyWiimoteAvailable(void);
@@ -44,12 +34,7 @@ TinyWiimoteData TinyWiimoteRead(void);
 
 void TinyWiimoteResetDevice(void);
 bool TinyWiimoteDeviceIsInited(void);
-void handleHciEvent(uint8_t event_code, uint8_t len, uint8_t* data);
-void handleAclData(uint8_t* data, size_t len);
 void handleHciData(uint8_t* data, size_t len);
-
-// void handleRxQueue(void);
-// void handleTxQueue(void);
 
 char* format2Hex(uint8_t* data, uint16_t len);
 

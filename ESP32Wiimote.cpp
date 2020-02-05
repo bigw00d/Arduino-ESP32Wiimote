@@ -42,28 +42,30 @@
 #define VERBOSE_PRINTLN(...) do {} while(0)
 #endif
 
+#define RX_QUEUE_SIZE 32
+#define TX_QUEUE_SIZE 32
+xQueueHandle ESP32Wiimote::rxQueue = NULL;
+xQueueHandle ESP32Wiimote::txQueue = NULL;
+
+const TwHciInterface ESP32Wiimote::tinywii_hci_interface = {
+  ESP32Wiimote::hciHostSendPacket
+};
+
+esp_vhci_host_callback_t ESP32Wiimote::vhci_callback;
+
 ESP32Wiimote::ESP32Wiimote(void)
 {
     ;
 }
 
-void notifyHostSendAvailable(void) {
+void ESP32Wiimote::notifyHostSendAvailable(void) {
   VERBOSE_PRINT("notifyHostSendAvailable\n");
   if(!TinyWiimoteDeviceIsInited()){
     TinyWiimoteResetDevice();
   }
 }
 
-typedef struct {
-        size_t len;
-        uint8_t data[];
-} queuedata_t;
-#define RX_QUEUE_SIZE 32
-#define TX_QUEUE_SIZE 32
-xQueueHandle rxQueue = NULL;
-xQueueHandle txQueue = NULL;
-
-void createQueue() {
+void ESP32Wiimote::createQueue(void) {
   txQueue = xQueueCreate(TX_QUEUE_SIZE, sizeof(queuedata_t*));
   if (txQueue == NULL){
     VERBOSE_PRINTLN("xQueueCreate(txQueue) failed");
@@ -76,7 +78,7 @@ void createQueue() {
   }
 }
 
-void handleTxQueue() {
+void ESP32Wiimote::handleTxQueue(void) {
   if(uxQueueMessagesWaiting(txQueue)){
     bool ok = esp_vhci_host_check_send_available();
     VERBOSE_PRINT("esp_vhci_host_check_send_available=%d", ok);
@@ -91,7 +93,7 @@ void handleTxQueue() {
   }
 }
 
-void handleRxQueue() {
+void ESP32Wiimote::handleRxQueue(void) {
   if(uxQueueMessagesWaiting(rxQueue)){
     queuedata_t *queuedata = NULL;
     if(xQueueReceive(rxQueue, &queuedata, 0) == pdTRUE){
@@ -101,8 +103,8 @@ void handleRxQueue() {
   }
 }
 
-static esp_err_t _sendQueueData(xQueueHandle queue, uint8_t *data, size_t len) {
-    VERBOSE_PRINTLN("_sendQueueData");
+esp_err_t ESP32Wiimote::sendQueueData(xQueueHandle queue, uint8_t *data, size_t len) {
+    VERBOSE_PRINTLN("sendQueueData");
     if(!data || !len){
         VERBOSE_PRINTLN("no data");
         return ESP_OK;
@@ -122,16 +124,11 @@ static esp_err_t _sendQueueData(xQueueHandle queue, uint8_t *data, size_t len) {
     return ESP_OK;
 }
 
-void hciHostSendPacket(uint8_t *data, size_t len) {
-  _sendQueueData(txQueue, data, len);
+void ESP32Wiimote::hciHostSendPacket(uint8_t *data, size_t len) {
+  sendQueueData(txQueue, data, len);
 }
 
-void hciHostRecvPacket(uint8_t *data, size_t len) {
-  _sendQueueData(rxQueue, data, len);
-}
-
-
-int notifyHostRecv(uint8_t *data, uint16_t len) {
+int ESP32Wiimote::notifyHostRecv(uint8_t *data, uint16_t len) {
   VERBOSE_PRINT("notifyHostRecv:");
   for (int i = 0; i < len; i++)
   {
@@ -139,19 +136,12 @@ int notifyHostRecv(uint8_t *data, uint16_t len) {
   }
   VERBOSE_PRINTLN("");
 
-  if(ESP_OK == _sendQueueData(rxQueue, data, len)){
+  if(ESP_OK == sendQueueData(rxQueue, data, len)){
     return ESP_OK;
   }else{
     return ESP_FAIL;
   }
 }
-
-static const TwHciInterface tinywii_hci_interface = {
-  hciHostSendPacket,
-  hciHostRecvPacket
-};
-
-esp_vhci_host_callback_t vhci_callback;
 
 void ESP32Wiimote::init(void)
 {
@@ -170,7 +160,6 @@ void ESP32Wiimote::init(void)
     if ((ret = esp_vhci_host_register_callback(&vhci_callback)) != ESP_OK) {
         return;
     }
-
 }
 
 void ESP32Wiimote::task(void)
