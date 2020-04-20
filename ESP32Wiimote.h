@@ -18,6 +18,16 @@
 #include "esp_bt.h"
 #include "TinyWiimote.h"
 
+typedef struct {
+        uint8_t xStick;
+        uint8_t yStick;
+        uint8_t xAxis;
+        uint8_t yAxis;
+        uint8_t zAxis;
+        uint8_t cBtn;
+        uint8_t zBtn;
+} NunchukState;
+
 class ESP32Wiimote
 {
 public:
@@ -42,6 +52,7 @@ public:
   void task(void);
   int available(void);
   uint16_t getButtonState(void);
+  NunchukState getNunchukState(void);
 
 private:
 
@@ -49,6 +60,8 @@ private:
           size_t len;
           uint8_t data[];
   } queuedata_t;
+
+  TinyWiimoteData gotData;
 
   static const TwHciInterface tinywii_hci_interface;
   static esp_vhci_host_callback_t vhci_callback;

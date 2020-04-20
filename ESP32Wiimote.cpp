@@ -173,15 +173,33 @@ void ESP32Wiimote::task(void)
 
 int ESP32Wiimote::available(void)
 {
-    return TinyWiimoteAvailable();
+    int stateIsAvailable = TinyWiimoteAvailable();
+    if (stateIsAvailable) {
+      gotData = TinyWiimoteRead();
+    }
+    return stateIsAvailable;
 }
 
 uint16_t ESP32Wiimote::getButtonState(void)
 {
   uint16_t button = 0;
-  TinyWiimoteData getData = TinyWiimoteRead();
-  button = (getData.data[TWII_OFFSET_BTNS1] << 8) | getData.data[TWII_OFFSET_BTNS2];
+  button = (gotData.data[TWII_OFFSET_BTNS1] << 8) | gotData.data[TWII_OFFSET_BTNS2];
   return button;
+}
+
+NunchukState ESP32Wiimote::getNunchukState(void)
+{
+  NunchukState state;
+  
+  state.xStick = gotData.data[0+TWII_OFFSET_EXTCTRL];
+  state.yStick = gotData.data[1+TWII_OFFSET_EXTCTRL];
+  state.xAxis = gotData.data[2+TWII_OFFSET_EXTCTRL];
+  state.yAxis = gotData.data[3+TWII_OFFSET_EXTCTRL];
+  state.zAxis = gotData.data[4+TWII_OFFSET_EXTCTRL];
+  state.cBtn = ((gotData.data[5+TWII_OFFSET_EXTCTRL] & 0x02) >> 1) ^ 0x01;
+  state.zBtn = (gotData.data[5+TWII_OFFSET_EXTCTRL] & 0x01) ^ 0x01;
+
+  return state;
 }
 
 

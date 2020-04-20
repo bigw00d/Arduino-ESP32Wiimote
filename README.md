@@ -36,9 +36,22 @@ void loop()
       if (button == ESP32Wiimote::BUTTON_A) {
         Serial.println("A button");
       }
+
+      // Caution: Nunchuck keeps outputting data(for axis data)
+      NunchukState nunchuk = wiimote.getNunchukState();
+      Serial.printf("nunchuk:");
+      Serial.printf(" X-Stick: %d", nunchuk.xStick);
+      Serial.printf(" Y-Stick: %d", nunchuk.yStick);
+      Serial.printf(" X-Axis: %d", nunchuk.xAxis);
+      Serial.printf(" Y-Axis: %d", nunchuk.yAxis);
+      Serial.printf(" Z-Axis: %d", nunchuk.zAxis);
+      Serial.printf(" C-Button: %02x", nunchuk.cBtn);
+      Serial.printf(" Z-Button: %02x", nunchuk.zBtn);
+      Serial.printf("\n");
   }
   delay(10);
 }
+
 
 ```
 
