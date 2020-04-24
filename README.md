@@ -25,6 +25,7 @@ void setup()
 {
     Serial.begin(115200);
     wiimote.init();
+    wiimote.addFilter(ACTION_IGNORE, FILTER_NUNCHUK_ACCEL);
 }
 
 void loop()
