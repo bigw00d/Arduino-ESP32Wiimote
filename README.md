@@ -14,7 +14,7 @@ ESP32Wiimote is a Arduino library that connects with a Wii remote.
 3. In the Arduino IDE, navigate to Sketch > Include Library > Add .ZIP Library.
 4. Select the zip file.
 
-## Example
+## Examples
 
 ### Basic Example
 
