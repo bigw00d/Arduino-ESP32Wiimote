@@ -16,6 +16,36 @@ ESP32Wiimote is a Arduino library that connects with a Wii remote.
 
 ## Example
 
+### Basic Example
+
+```ESP32WiimoteDemo.ino.cpp
+#include "ESP32Wiimote.h"
+
+ESP32Wiimote wiimote;
+
+void setup()
+{
+    Serial.begin(115200);
+    wiimote.init();
+}
+
+void loop()
+{
+  wiimote.task();
+  if (wiimote.available() > 0) {
+      uint16_t button = wiimote.getButtonState();
+      Serial.printf("%04x\n", button);
+      if (button == ESP32Wiimote::BUTTON_A) {
+        Serial.println("A button");
+      }
+  }
+  delay(10);
+}
+
+
+```
+### Example With Nunchuck
+
 ```ESP32WiimoteDemo.ino.cpp
 #include "ESP32Wiimote.h"
 
@@ -34,11 +64,7 @@ void loop()
   if (wiimote.available() > 0) {
       uint16_t button = wiimote.getButtonState();
       Serial.printf("%04x\n", button);
-      if (button == ESP32Wiimote::BUTTON_A) {
-        Serial.println("A button");
-      }
 
-      // Caution: Nunchuck keeps outputting data(for axis data)
       NunchukState nunchuk = wiimote.getNunchukState();
       Serial.printf("nunchuk:");
       Serial.printf(" X-Stick: %d", nunchuk.xStick);
@@ -53,10 +79,12 @@ void loop()
   delay(10);
 }
 
-
 ```
 
-#### Button
+- Caution: Nunchuck keeps outputting a lot of data for acceleration sensing
+- You can Ignore changes with 'add filter(ACTION_IGNORE,...)'
+
+#### Button Definition
 'button' is expressed as OR of bits:
 
 ```
