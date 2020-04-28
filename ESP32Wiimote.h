@@ -18,6 +18,30 @@
 #include "esp_bt.h"
 #include "TinyWiimote.h"
 
+typedef struct {
+        uint8_t xStick;
+        uint8_t yStick;
+        uint8_t xAxis;
+        uint8_t yAxis;
+        uint8_t zAxis;
+        uint8_t cBtn;
+        uint8_t zBtn;
+} NunchukState;
+
+enum
+{
+  FILTER_NONE                = 0x0000,
+  FILTER_REMOTE_BUTTON       = 0x0001,
+  FILTER_NUNCHUK_BUTTON      = 0x0002,
+  FILTER_NUNCHUK_STICK       = 0x0004,
+  FILTER_NUNCHUK_ACCEL       = 0x0008,
+};
+
+enum
+{
+  ACTION_IGNORE,
+};
+
 class ESP32Wiimote
 {
 public:
@@ -35,6 +59,8 @@ public:
     BUTTON_ONE        = 0x0002,
     BUTTON_TWO        = 0x0001
   };
+    
+  const int NUNCHUK_STICK_THRESHOLD = 2;
 
   ESP32Wiimote(void);
 
@@ -42,6 +68,8 @@ public:
   void task(void);
   int available(void);
   uint16_t getButtonState(void);
+  NunchukState getNunchukState(void);
+  void addFilter(int action, int filter);
 
 private:
 
@@ -49,6 +77,21 @@ private:
           size_t len;
           uint8_t data[];
   } queuedata_t;
+
+  TinyWiimoteData _gotData;
+
+  uint16_t _buttonState;
+  uint16_t _oldButtonState;
+
+  NunchukState *_pNunchukState;
+  NunchukState *_pOldNunchukState;
+
+  NunchukState _nunchukStateA;
+  NunchukState _nunchukStateB;
+
+  int _nunStickThreshold;
+
+  int _filter;
 
   static const TwHciInterface tinywii_hci_interface;
   static esp_vhci_host_callback_t vhci_callback;

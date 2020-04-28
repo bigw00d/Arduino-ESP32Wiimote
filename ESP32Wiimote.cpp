@@ -55,7 +55,10 @@ esp_vhci_host_callback_t ESP32Wiimote::vhci_callback;
 
 ESP32Wiimote::ESP32Wiimote(void)
 {
-    ;
+    _pNunchukState = &_nunchukStateA;
+    _pOldNunchukState = &_nunchukStateB;
+    _nunStickThreshold = NUNCHUK_STICK_THRESHOLD * NUNCHUK_STICK_THRESHOLD;
+    _filter = FILTER_NONE;
 }
 
 void ESP32Wiimote::notifyHostSendAvailable(void) {
@@ -173,16 +176,99 @@ void ESP32Wiimote::task(void)
 
 int ESP32Wiimote::available(void)
 {
-    return TinyWiimoteAvailable();
+    int stateIsAvailable = TinyWiimoteAvailable();
+    if (stateIsAvailable) {
+      NunchukState *pTmpNunchuck;
+
+      _gotData = TinyWiimoteRead();
+
+      // update old button state
+      _oldButtonState = _buttonState;
+
+      // update button state
+      _buttonState = 0;
+      _buttonState = (_gotData.data[TWII_OFFSET_BTNS1] << 8) | _gotData.data[TWII_OFFSET_BTNS2];
+
+      // update old nunchuck state(= exchange nunchuk state area)
+      pTmpNunchuck =  _pOldNunchukState;
+      _pOldNunchukState =  _pNunchukState;
+      _pNunchukState =  pTmpNunchuck;
+
+      // update nunchuk state
+      _pNunchukState->xStick = _gotData.data[TWII_OFFSET_EXTCTRL + 0];
+      _pNunchukState->yStick = _gotData.data[TWII_OFFSET_EXTCTRL + 1];
+      _pNunchukState->xAxis = _gotData.data[TWII_OFFSET_EXTCTRL + 2];
+      _pNunchukState->yAxis = _gotData.data[TWII_OFFSET_EXTCTRL + 3];
+      _pNunchukState->zAxis = _gotData.data[TWII_OFFSET_EXTCTRL + 4];
+      _pNunchukState->cBtn = ((_gotData.data[TWII_OFFSET_EXTCTRL + 5] & 0x02) >> 1) ^ 0x01;
+      _pNunchukState->zBtn = (_gotData.data[TWII_OFFSET_EXTCTRL + 5] & 0x01) ^ 0x01;
+
+      // check button change
+      int buttonIsChanged = false;
+      if (_filter & FILTER_REMOTE_BUTTON) {
+        ; // ignore
+      }
+      else if (_buttonState != _oldButtonState) {
+        buttonIsChanged = true;
+      }
+
+      // check nunchuk stick change
+      int nunchukStickIsChanged = false;
+      int nunXStickDelta = (int)(_pNunchukState->xStick) - _pOldNunchukState->xStick;
+      int nunYStickDelta = (int)(_pNunchukState->yStick) - _pOldNunchukState->yStick;
+      int nunStickDelta = (nunXStickDelta*nunXStickDelta + nunYStickDelta*nunYStickDelta) / 2;
+      if (_filter & FILTER_NUNCHUK_STICK) {
+        ; // ignore
+      }
+      else if (nunStickDelta >= _nunStickThreshold) {
+        nunchukStickIsChanged = true;
+      }
+
+      // check nunchuk button change
+      int nunchukButtonIsChanged = false;
+      if (_filter & FILTER_NUNCHUK_BUTTON) {
+        ; // ignore
+      }
+      else if (
+        (_pNunchukState->cBtn != _pOldNunchukState->cBtn)
+        || (_pNunchukState->zBtn != _pOldNunchukState->zBtn)
+      ) {
+        nunchukButtonIsChanged = true;
+      }
+
+      // check accel change
+      int accelIsChanged = false;
+      if (_filter & FILTER_NUNCHUK_ACCEL) {
+        ; // ignore
+      }
+      else {
+        accelIsChanged = true;
+      }
+
+      stateIsAvailable = 
+        ( buttonIsChanged
+        | nunchukStickIsChanged
+        | nunchukButtonIsChanged
+        | accelIsChanged
+        );
+
+    }
+    return stateIsAvailable;
 }
 
 uint16_t ESP32Wiimote::getButtonState(void)
 {
-  uint16_t button = 0;
-  TinyWiimoteData getData = TinyWiimoteRead();
-  button = (getData.data[TWII_OFFSET_BTNS1] << 8) | getData.data[TWII_OFFSET_BTNS2];
-  return button;
+  return _buttonState;
 }
 
+NunchukState ESP32Wiimote::getNunchukState(void)
+{
+  return *_pNunchukState;
+}
 
+void ESP32Wiimote::addFilter(int action, int filter) {
+  if (action == ACTION_IGNORE) {
+    _filter = _filter | filter;
+  }
+}
 

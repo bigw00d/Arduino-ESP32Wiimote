@@ -14,7 +14,9 @@ ESP32Wiimote is a Arduino library that connects with a Wii remote.
 3. In the Arduino IDE, navigate to Sketch > Include Library > Add .ZIP Library.
 4. Select the zip file.
 
-## Example
+## Examples
+
+### Basic Example
 
 ```ESP32WiimoteDemo.ino.cpp
 #include "ESP32Wiimote.h"
@@ -40,9 +42,49 @@ void loop()
   delay(10);
 }
 
+
+```
+### Example With Nunchuck
+
+```ESP32WiimoteDemo.ino.cpp
+#include "ESP32Wiimote.h"
+
+ESP32Wiimote wiimote;
+
+void setup()
+{
+    Serial.begin(115200);
+    wiimote.init();
+    wiimote.addFilter(ACTION_IGNORE, FILTER_NUNCHUK_ACCEL);
+}
+
+void loop()
+{
+  wiimote.task();
+  if (wiimote.available() > 0) {
+      uint16_t button = wiimote.getButtonState();
+      Serial.printf("%04x\n", button);
+
+      NunchukState nunchuk = wiimote.getNunchukState();
+      Serial.printf("nunchuk:");
+      Serial.printf(" X-Stick: %d", nunchuk.xStick);
+      Serial.printf(" Y-Stick: %d", nunchuk.yStick);
+      Serial.printf(" X-Axis: %d", nunchuk.xAxis);
+      Serial.printf(" Y-Axis: %d", nunchuk.yAxis);
+      Serial.printf(" Z-Axis: %d", nunchuk.zAxis);
+      Serial.printf(" C-Button: %02x", nunchuk.cBtn);
+      Serial.printf(" Z-Button: %02x", nunchuk.zBtn);
+      Serial.printf("\n");
+  }
+  delay(10);
+}
+
 ```
 
-#### Button
+- Caution: Nunchuck keeps outputting a lot of data for acceleration sensing
+- You can Ignore changes with 'add filter(ACTION_IGNORE,...)'
+
+#### Button Definition
 'button' is expressed as OR of bits:
 
 ```
