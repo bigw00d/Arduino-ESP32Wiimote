@@ -19,15 +19,10 @@
 #include "TinyWiimote.h"
 
 typedef struct {
-        uint8_t xStick;
-        uint8_t yStick;
-        uint8_t xAxis;
-        uint8_t yAxis;
-        uint8_t zAxis;
-// moved to ButtonState        
-//      uint8_t cBtn;
-//      uint8_t zBtn;
-} NunchukState;
+    uint8_t xAxis;
+    uint8_t yAxis;
+    uint8_t zAxis;
+} AccelState;
 
 typedef enum {
     BUTTON_Z          = 0x00020000, // nunchuk
@@ -46,13 +41,24 @@ typedef enum {
     NO_BUTTON         = 0x00000000
 } ButtonState;
 
+typedef struct {
+        uint8_t xStick;
+        uint8_t yStick;
+        uint8_t xAxis;
+        uint8_t yAxis;
+        uint8_t zAxis;
+// moved to ButtonState
+//      uint8_t cBtn;
+//      uint8_t zBtn;
+} NunchukState;
+
 enum
 {
   FILTER_NONE                = 0x0000,
   FILTER_BUTTON              = 0x0001,
 //FILTER_NUNCHUK_BUTTON      = 0x0002,
   FILTER_NUNCHUK_STICK       = 0x0004,
-  FILTER_NUNCHUK_ACCEL       = 0x0008,
+  FILTER_ACCEL               = 0x0008,
 };
 
 enum
@@ -69,6 +75,7 @@ public:
   void task(void);
   int available(void);
   ButtonState getButtonState(void);
+  AccelState getAccelState(void);
   NunchukState getNunchukState(void);
   void addFilter(int action, int filter);
 
@@ -79,16 +86,14 @@ private:
           uint8_t data[];
   } queuedata_t;
 
-  TinyWiimoteData _gotData;
-
   ButtonState _buttonState;
   ButtonState _oldButtonState;
 
-  NunchukState *_pNunchukState;
-  NunchukState *_pOldNunchukState;
+  AccelState _accelState;
+  AccelState _oldAccelState;
 
-  NunchukState _nunchukStateA;
-  NunchukState _nunchukStateB;
+  NunchukState _nunchukState;
+  NunchukState _oldNunchukState;
 
   int _nunStickThreshold;
 

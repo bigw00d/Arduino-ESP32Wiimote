@@ -892,8 +892,8 @@ static void handleExtensionControllerReports(uint16_t ch, uint16_t channelID, ui
         writingEEPROM(ch, CONTROL_REGISTER, 0xA400F0, (const uint8_t[]){0x55}, 1);
         controllerReportState = REPORT_STATE_WAIT_ACK_OUT_REPORT;
       }else{ // extension controller is NOT connected
-        setDataReportingMode(ch, 0x30, false); // 0x30: Core Buttons : 30 BB BB
-        // [note] Core Buttons and Accelerometer: 31 BB BB AA AA AA
+//      setDataReportingMode(ch, 0x30, false); // Core Buttons : 30 BB BB
+        setDataReportingMode(ch, 0x31, false); // Core Buttons and Accelerometer: 31 BB BB AA AA AA
         // [note] Core Buttons and Accelerometer with 12 IR bytes: 33 BB BB AA AA AA II II II II II II II II II II II II 
       }
     }
@@ -930,7 +930,8 @@ static void handleExtensionControllerReports(uint16_t ch, uint16_t channelID, ui
     if(data[1] == 0x21){
       if(memcmp(data+5, (const uint8_t[]){0x00, 0xFA}, 2) == 0){
         if(memcmp(data+7, (const uint8_t[]){0x00, 0x00, 0xA4, 0x20, 0x00, 0x00}, 6) == 0){ // Nunchuck
-          setDataReportingMode(ch, 0x32, false); // 0x32: Core Buttons with 8 Extension bytes : 32 BB BB EE EE EE EE EE EE EE EE
+//        setDataReportingMode(ch, 0x32, false); // Core Buttons with 8 Extension bytes : 32 BB BB EE EE EE EE EE EE EE EE
+          setDataReportingMode(ch, 0x35, false); // Core Buttons and Accelerometer with 16 Extension bytes: 35 BB BB AA AA AA EE EE ...
         }
         controllerReportState = REPORT_STATE_INIT;
       }
@@ -990,6 +991,7 @@ static void handleL2capData(uint16_t ch, uint16_t channelID, uint8_t* data, uint
     case BTCODE_HID:
       if(!wiimoteConnected){
         setPlayerLEDs(ch, 0b0001);
+        setDataReportingMode(ch, 0x31, false); // Core Buttons and Accelerometer: 31 BB BB AA AA AA
         wiimoteConnected = true;
       }
       handleExtensionControllerReports(ch, channelID, data, len);
