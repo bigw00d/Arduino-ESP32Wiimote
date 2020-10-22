@@ -35,6 +35,9 @@ TinyWiimoteData TinyWiimoteRead(void);
 
 void TinyWiimoteResetDevice(void);
 bool TinyWiimoteDeviceIsInited(void);
+
+void TinyWiimoteReqAccelerometer(bool use);
+
 void handleHciData(uint8_t* data, size_t len);
 
 char* format2Hex(uint8_t* data, uint16_t len);

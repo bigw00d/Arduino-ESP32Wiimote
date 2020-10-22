@@ -28,10 +28,10 @@ typedef enum {
     BUTTON_Z          = 0x00020000, // nunchuk
     BUTTON_C          = 0x00010000, // nunchuk
     BUTTON_PLUS       = 0x00001000,
-    BUTTON_LEFT       = 0x00000800,
-    BUTTON_RIGHT      = 0x00000400,
-    BUTTON_UP         = 0x00000200,
-    BUTTON_DOWN       = 0x00000100,
+    BUTTON_UP         = 0x00000800, // vertical orientation
+    BUTTON_DOWN       = 0x00000400,
+    BUTTON_RIGHT      = 0x00000200,
+    BUTTON_LEFT       = 0x00000100,
     BUTTON_HOME       = 0x00000080,
     BUTTON_MINUS      = 0x00000010,
     BUTTON_A          = 0x00000008,

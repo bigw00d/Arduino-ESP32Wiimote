@@ -339,6 +339,9 @@ NunchukState ESP32Wiimote::getNunchukState(void)
 void ESP32Wiimote::addFilter(int action, int filter) {
   if (action == ACTION_IGNORE) {
     _filter = _filter | filter;
+
+    if (filter & FILTER_ACCEL)
+      TinyWiimoteReqAccelerometer(false);
   }
 }
 
