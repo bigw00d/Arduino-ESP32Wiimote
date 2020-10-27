@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <HardwareSerial.h> // for Arduino
 
 #include "time.h"
 #include "sys/time.h"
@@ -27,13 +28,15 @@
 #define WIIMOTE_VERBOSE 0
 
 #if WIIMOTE_VERBOSE
-#include <HardwareSerial.h> // for Arduino
 #define VERBOSE_PRINT(...) Serial.printf(__VA_ARGS__)
 #define VERBOSE_PRINTLN(...) Serial.println(__VA_ARGS__)
 #else
 #define VERBOSE_PRINT(...) do {} while(0)
 #define VERBOSE_PRINTLN(...) do {} while(0)
 #endif
+
+#define UNVERBOSE_PRINT(...) Serial.printf(__VA_ARGS__)
+//#define UNVERBOSE_PRINT(...) do {} while(0)
 
 #define HCI_H4_CMD_PREAMBLE_SIZE           (4)
 #define HCI_H4_ACL_PREAMBLE_SIZE           (5)
@@ -119,6 +122,8 @@ enum {
 
 static bool deviceInited = false;
 static bool wiimoteConnected = false;
+static bool nunchukConnected = false;
+static bool useAccelerometer = true;
 
 /**
  * Command Maker
@@ -244,7 +249,7 @@ static uint16_t make_acl_l2cap_packet(uint8_t *buf, uint16_t ch, uint8_t pbf, ui
   return HCI_H4_ACL_PREAMBLE_SIZE + l2capLen;
 }
 
-TwHciInterface _hciInterface;
+static TwHciInterface _hciInterface;
 
 static void sendHciPacket(uint8_t *data, size_t len) {
     VERBOSE_PRINTLN("sendHciPacket");
@@ -327,16 +332,11 @@ static void l2capClearConnection(void) {
 static uint8_t tmpQueueData[256];
 
 static void resetDevice(void) {
-  VERBOSE_PRINTLN("resetDevice");
+  UNVERBOSE_PRINT("resetDevice\n");
   connected_device_clear();
   l2capClearConnection();
   uint16_t len = make_cmd_reset(tmpQueueData);
   sendHciPacket(tmpQueueData, len);
-}
-
-void TinyWiimoteResetDevice(void) {
-  resetDevice();
-  deviceInited = true;
 }
 
 /**
@@ -526,7 +526,7 @@ static void handleRemoteNameRequestCompleteEvent(uint8_t len, uint8_t* data) {
 }
 
 #define L2CAP_PAYLOAD_MAX_LEN (64)
-uint8_t payload[L2CAP_PAYLOAD_MAX_LEN];
+static uint8_t payload[L2CAP_PAYLOAD_MAX_LEN];
 
 static void l2capConnect(uint16_t ch, uint16_t psm, uint16_t cid) {
     uint8_t  pbf = 0b10; // Packet Boundary Flag
@@ -580,7 +580,9 @@ static void handleDisconnectionCompleteEvent(uint8_t len, uint8_t* data) {
     VERBOSE_PRINT("Connection_Handle  = 0x%04X  ", ch);
     VERBOSE_PRINT("Reason             = %02X", reason);
 
+    UNVERBOSE_PRINT("Wiimote lost\n");
     wiimoteConnected = false;
+    nunchukConnected = false;
     resetDevice();
 }
 
@@ -849,6 +851,7 @@ static void readingEEPROM(uint16_t ch, int as, uint32_t offset, uint16_t size) {
 }
 
 static void setDataReportingMode(uint16_t ch, uint8_t mode, bool continuous) {
+  UNVERBOSE_PRINT("setDataReportingMode 0x%02X (ch:%d)\n", (int)mode, (int)ch);
   int idx = l2capFindConnection(ch);
   struct l2cap_connection_t connection = l2capConnectionList[idx];
 
@@ -889,11 +892,16 @@ static void handleExtensionControllerReports(uint16_t ch, uint16_t channelID, ui
     // (a1) 20 BB BB LF 00 00 VV
     if(data[1] == 0x20){
       if(data[4] & 0x02){ // extension controller is connected
+        UNVERBOSE_PRINT("Extension controller connected\n");
         writingEEPROM(ch, CONTROL_REGISTER, 0xA400F0, (const uint8_t[]){0x55}, 1);
         controllerReportState = REPORT_STATE_WAIT_ACK_OUT_REPORT;
       }else{ // extension controller is NOT connected
-        setDataReportingMode(ch, 0x30, false); // 0x30: Core Buttons : 30 BB BB
-        // [note] Core Buttons and Accelerometer: 31 BB BB AA AA AA
+          UNVERBOSE_PRINT("Extension controller NOT connected\n");
+          nunchukConnected = false;
+          if (useAccelerometer)
+            setDataReportingMode(ch, 0x31, false); // Core Buttons and Accelerometer: 31 BB BB AA AA AA
+          else
+            setDataReportingMode(ch, 0x30, false); // Core Buttons : 30 BB BB
         // [note] Core Buttons and Accelerometer with 12 IR bytes: 33 BB BB AA AA AA II II II II II II II II II II II II 
       }
     }
@@ -929,8 +937,13 @@ static void handleExtensionControllerReports(uint16_t ch, uint16_t channelID, ui
     // (a1) 21 BB BB SE FF FF DD DD DD DD DD DD DD DD DD DD DD DD DD DD DD DD
     if(data[1] == 0x21){
       if(memcmp(data+5, (const uint8_t[]){0x00, 0xFA}, 2) == 0){
-        if(memcmp(data+7, (const uint8_t[]){0x00, 0x00, 0xA4, 0x20, 0x00, 0x00}, 6) == 0){ // Nunchuck
-          setDataReportingMode(ch, 0x32, false); // 0x32: Core Buttons with 8 Extension bytes : 32 BB BB EE EE EE EE EE EE EE EE
+        if(memcmp(data+7, (const uint8_t[]){0x00, 0x00, 0xA4, 0x20, 0x00, 0x00}, 6) == 0){ // Nunchuk
+          UNVERBOSE_PRINT("Nunchuk detected\n");
+          nunchukConnected = true;
+          if (useAccelerometer)
+            setDataReportingMode(ch, 0x35, false); // Core Buttons and Accelerometer with 16 Extension bytes: 35 BB BB AA AA AA EE EE ...
+          else
+            setDataReportingMode(ch, 0x32, false); // Core Buttons with 8 Extension bytes : 32 BB BB EE EE EE EE EE EE EE EE
         }
         controllerReportState = REPORT_STATE_INIT;
       }
@@ -948,9 +961,9 @@ struct recv_data_rb {
   uint8_t rp;
   uint8_t cnt;
 };
-recv_data_rb receivedDataRb;
+static recv_data_rb receivedDataRb;
 #define RECIEVED_DATA_MAX_NUM     (5)
-TinyWiimoteData receivedData[RECIEVED_DATA_MAX_NUM];
+static TinyWiimoteData receivedData[RECIEVED_DATA_MAX_NUM];
 
 void putWiimoteReceivedData(uint8_t number, uint8_t* data, uint8_t len) {
   if(receivedDataRb.cnt < RECIEVED_DATA_MAX_NUM) {
@@ -990,7 +1003,10 @@ static void handleL2capData(uint16_t ch, uint16_t channelID, uint8_t* data, uint
     case BTCODE_HID:
       if(!wiimoteConnected){
         setPlayerLEDs(ch, 0b0001);
+        UNVERBOSE_PRINT("Wiimote detected\n");
         wiimoteConnected = true;
+        if (useAccelerometer)
+          setDataReportingMode(ch, 0x31, false); // Core Buttons and Accelerometer: 31 BB BB AA AA AA
       }
       handleExtensionControllerReports(ch, channelID, data, len);
       handleReport(data, len);
@@ -1041,6 +1057,11 @@ void handleHciData(uint8_t* data, size_t len) {
     }
 }
 
+void TinyWiimoteResetDevice(void) {
+  resetDevice();
+  deviceInited = true;
+}
+
 bool TinyWiimoteDeviceIsInited(void) {
   return deviceInited;
 }
@@ -1066,4 +1087,8 @@ void TinyWiimoteInit(TwHciInterface hciInterface) {
     receivedDataRb.wp = 0;
     receivedDataRb.rp = 0;
     _hciInterface = hciInterface;
+}
+
+void TinyWiimoteReqAccelerometer(bool use) {
+    useAccelerometer = use;
 }

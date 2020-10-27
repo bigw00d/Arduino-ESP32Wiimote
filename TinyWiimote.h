@@ -21,9 +21,9 @@ struct TinyWiimoteData {
   uint8_t data[RECIEVED_DATA_MAX_LEN];
   uint8_t len;
 };
-#define TWII_OFFSET_BTNS1 (2)
-#define TWII_OFFSET_BTNS2 (3)
-#define TWII_OFFSET_EXTCTRL (4) // Offset for Extension Controllers data
+//#define TWII_OFFSET_BTNS1 (2)
+//#define TWII_OFFSET_BTNS2 (3)
+//#define TWII_OFFSET_EXTCTRL (4) // Offset for Extension Controllers data
 
 typedef struct tinywii_device_callback {
     void (*hci_send_packet)(uint8_t *data, size_t len);
@@ -35,6 +35,9 @@ TinyWiimoteData TinyWiimoteRead(void);
 
 void TinyWiimoteResetDevice(void);
 bool TinyWiimoteDeviceIsInited(void);
+
+void TinyWiimoteReqAccelerometer(bool use);
+
 void handleHciData(uint8_t* data, size_t len);
 
 char* format2Hex(uint8_t* data, uint16_t len);

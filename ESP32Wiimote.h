@@ -19,22 +19,46 @@
 #include "TinyWiimote.h"
 
 typedef struct {
+    uint8_t xAxis;
+    uint8_t yAxis;
+    uint8_t zAxis;
+} AccelState;
+
+typedef enum {
+    BUTTON_Z          = 0x00020000, // nunchuk
+    BUTTON_C          = 0x00010000, // nunchuk
+    BUTTON_PLUS       = 0x00001000,
+    BUTTON_UP         = 0x00000800, // vertical orientation
+    BUTTON_DOWN       = 0x00000400,
+    BUTTON_RIGHT      = 0x00000200,
+    BUTTON_LEFT       = 0x00000100,
+    BUTTON_HOME       = 0x00000080,
+    BUTTON_MINUS      = 0x00000010,
+    BUTTON_A          = 0x00000008,
+    BUTTON_B          = 0x00000004,
+    BUTTON_ONE        = 0x00000002,
+    BUTTON_TWO        = 0x00000001,
+    NO_BUTTON         = 0x00000000
+} ButtonState;
+
+typedef struct {
         uint8_t xStick;
         uint8_t yStick;
         uint8_t xAxis;
         uint8_t yAxis;
         uint8_t zAxis;
-        uint8_t cBtn;
-        uint8_t zBtn;
+// moved to ButtonState
+//      uint8_t cBtn;
+//      uint8_t zBtn;
 } NunchukState;
 
 enum
 {
   FILTER_NONE                = 0x0000,
-  FILTER_REMOTE_BUTTON       = 0x0001,
-  FILTER_NUNCHUK_BUTTON      = 0x0002,
+  FILTER_BUTTON              = 0x0001,
+//FILTER_NUNCHUK_BUTTON      = 0x0002,
   FILTER_NUNCHUK_STICK       = 0x0004,
-  FILTER_NUNCHUK_ACCEL       = 0x0008,
+  FILTER_ACCEL               = 0x0008,
 };
 
 enum
@@ -45,29 +69,13 @@ enum
 class ESP32Wiimote
 {
 public:
-  enum
-  {
-    BUTTON_LEFT       = 0x0800,
-    BUTTON_RIGHT      = 0x0400,
-    BUTTON_UP         = 0x0200,
-    BUTTON_DOWN       = 0x0100,
-    BUTTON_A          = 0x0008,
-    BUTTON_B          = 0x0004,
-    BUTTON_PLUS       = 0x1000,
-    BUTTON_HOME       = 0x0080,
-    BUTTON_MINUS      = 0x0010,
-    BUTTON_ONE        = 0x0002,
-    BUTTON_TWO        = 0x0001
-  };
-    
-  const int NUNCHUK_STICK_THRESHOLD = 2;
-
-  ESP32Wiimote(void);
+  ESP32Wiimote(int NUNCHUK_STICK_THRESHOLD = 1); // was 2
 
   void init(void);
   void task(void);
   int available(void);
-  uint16_t getButtonState(void);
+  ButtonState getButtonState(void);
+  AccelState getAccelState(void);
   NunchukState getNunchukState(void);
   void addFilter(int action, int filter);
 
@@ -78,16 +86,14 @@ private:
           uint8_t data[];
   } queuedata_t;
 
-  TinyWiimoteData _gotData;
+  ButtonState _buttonState;
+  ButtonState _oldButtonState;
 
-  uint16_t _buttonState;
-  uint16_t _oldButtonState;
+  AccelState _accelState;
+  AccelState _oldAccelState;
 
-  NunchukState *_pNunchukState;
-  NunchukState *_pOldNunchukState;
-
-  NunchukState _nunchukStateA;
-  NunchukState _nunchukStateB;
+  NunchukState _nunchukState;
+  NunchukState _oldNunchukState;
 
   int _nunStickThreshold;
 

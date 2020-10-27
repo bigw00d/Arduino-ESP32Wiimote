@@ -12,7 +12,7 @@
 //   Under the following terms:
 //     NonCommercial — You may not use the material for commercial purposes.
 
-#define CONFIG_CLASSIC_BT_ENABLED
+//#define CONFIG_CLASSIC_BT_ENABLED 1
 
 #include <stdint.h>
 #include <string.h>
@@ -42,6 +42,9 @@
 #define VERBOSE_PRINTLN(...) do {} while(0)
 #endif
 
+//#define UNVERBOSE_PRINT(...) Serial.printf(__VA_ARGS__)
+#define UNVERBOSE_PRINT(...) do {} while(0)
+
 #define RX_QUEUE_SIZE 32
 #define TX_QUEUE_SIZE 32
 xQueueHandle ESP32Wiimote::rxQueue = NULL;
@@ -53,11 +56,9 @@ const TwHciInterface ESP32Wiimote::tinywii_hci_interface = {
 
 esp_vhci_host_callback_t ESP32Wiimote::vhci_callback;
 
-ESP32Wiimote::ESP32Wiimote(void)
+ESP32Wiimote::ESP32Wiimote(int NUNCHUK_STICK_THRESHOLD)
 {
-    _pNunchukState = &_nunchukStateA;
-    _pOldNunchukState = &_nunchukStateB;
-    _nunStickThreshold = NUNCHUK_STICK_THRESHOLD * NUNCHUK_STICK_THRESHOLD;
+    _nunStickThreshold = NUNCHUK_STICK_THRESHOLD;
     _filter = FILTER_NONE;
 }
 
@@ -89,7 +90,7 @@ void ESP32Wiimote::handleTxQueue(void) {
       queuedata_t *queuedata = NULL;
       if(xQueueReceive(txQueue, &queuedata, 0) == pdTRUE){
         esp_vhci_host_send_packet(queuedata->data, queuedata->len);
-        VERBOSE_PRINT("SEND => %s", format2Hex(queuedata->data, queuedata->len));
+        UNVERBOSE_PRINT("SEND => %s\n", format2Hex(queuedata->data, queuedata->len));
         free(queuedata);
       }
     }
@@ -119,6 +120,7 @@ esp_err_t ESP32Wiimote::sendQueueData(xQueueHandle queue, uint8_t *data, size_t 
     }
     queuedata->len = len;
     memcpy(queuedata->data, data, len);
+    UNVERBOSE_PRINT("RECV <= %s\n", format2Hex(queuedata->data, queuedata->len));
     if (xQueueSend(queue, &queuedata, portMAX_DELAY) != pdPASS) {
         VERBOSE_PRINTLN("xQueueSend failed");
         free(queuedata);
@@ -176,99 +178,170 @@ void ESP32Wiimote::task(void)
 
 int ESP32Wiimote::available(void)
 {
-    int stateIsAvailable = TinyWiimoteAvailable();
-    if (stateIsAvailable) {
-      NunchukState *pTmpNunchuck;
+    int offs = 0;
+    int buttonIsChanged = false;
+//  int nunchukButtonIsChanged = false;
+    int accelIsChanged = false;
+    int nunchukStickIsChanged = false;
+    uint8_t cBtn = 0;
+    uint8_t zBtn = 0;
 
-      _gotData = TinyWiimoteRead();
+    if (! TinyWiimoteAvailable())
+        return 0;
 
-      // update old button state
-      _oldButtonState = _buttonState;
+    TinyWiimoteData rd = TinyWiimoteRead();
 
-      // update button state
-      _buttonState = 0;
-      _buttonState = (_gotData.data[TWII_OFFSET_BTNS1] << 8) | _gotData.data[TWII_OFFSET_BTNS2];
+    if (rd.len < 4) // 
+        return 0;
+    if (rd.data[0] != 0xA1) // no data input
+        return 0;
+      
+    // update old states
+    _oldButtonState  = _buttonState;
+    _oldAccelState   = _accelState;
+    _oldNunchukState = _nunchukState;
 
-      // update old nunchuck state(= exchange nunchuk state area)
-      pTmpNunchuck =  _pOldNunchukState;
-      _pOldNunchukState =  _pNunchukState;
-      _pNunchukState =  pTmpNunchuck;
+    if ((rd.data[1] >= 0x30) && (rd.data[1] <= 0x37)) // data report with button data
+        offs = 2;
 
-      // update nunchuk state
-      _pNunchukState->xStick = _gotData.data[TWII_OFFSET_EXTCTRL + 0];
-      _pNunchukState->yStick = _gotData.data[TWII_OFFSET_EXTCTRL + 1];
-      _pNunchukState->xAxis = _gotData.data[TWII_OFFSET_EXTCTRL + 2];
-      _pNunchukState->yAxis = _gotData.data[TWII_OFFSET_EXTCTRL + 3];
-      _pNunchukState->zAxis = _gotData.data[TWII_OFFSET_EXTCTRL + 4];
-      _pNunchukState->cBtn = ((_gotData.data[TWII_OFFSET_EXTCTRL + 5] & 0x02) >> 1) ^ 0x01;
-      _pNunchukState->zBtn = (_gotData.data[TWII_OFFSET_EXTCTRL + 5] & 0x01) ^ 0x01;
+    if (offs) // update button state
+        _buttonState = (ButtonState)((rd.data[offs + 0] << 8) | rd.data[offs + 1]);
 
-      // check button change
-      int buttonIsChanged = false;
-      if (_filter & FILTER_REMOTE_BUTTON) {
+    // get accelerometer offset
+    switch (rd.data[1])
+    {
+    case 0x31: offs = 4; break; // Core Buttons and Accelerometer
+    case 0x35: offs = 4; break; // Core Buttons and Accelerometer with 16 Extension Bytes
+    default:   offs = 0;
+    }
+
+    if (offs) // update accelerometer
+    {
+        _accelState.xAxis  = rd.data[offs + 0];
+        _accelState.yAxis  = rd.data[offs + 1];
+        _accelState.zAxis  = rd.data[offs + 2];
+
+        // check accel change
+        if (_filter & FILTER_ACCEL) {
+            ; // ignore
+        }
+        else {
+            accelIsChanged = true;
+        }
+    }
+    else
+    {
+        _accelState.xAxis  = 0;
+        _accelState.yAxis  = 0;
+        _accelState.zAxis  = 0;
+    }
+
+    // get extension offset
+    switch (rd.data[1])
+    {
+    case 0x32: offs = 4; break; // Core Buttons with 8 Extension bytes
+    case 0x35: offs = 7; break; // Core Buttons and Accelerometer with 16 Extension Bytes
+    default:   offs = 0;
+    }
+
+    if (offs) // update nunchuk state
+    {
+        _nunchukState.xStick = rd.data[offs + 0];
+        _nunchukState.yStick = rd.data[offs + 1];
+        _nunchukState.xAxis  = rd.data[offs + 2];
+        _nunchukState.yAxis  = rd.data[offs + 3];
+        _nunchukState.zAxis  = rd.data[offs + 4];
+
+        // update nunchuk buttons
+        cBtn = ((rd.data[offs + 5] & 0x02) >> 1) ^ 0x01;
+        zBtn =  (rd.data[offs + 5] & 0x01)       ^ 0x01;
+    }
+    else
+    {
+        _nunchukState.xStick = 0;
+        _nunchukState.yStick = 0;
+        _nunchukState.xAxis  = 0;
+        _nunchukState.yAxis  = 0;
+        _nunchukState.zAxis  = 0;
+    }
+    
+
+    // add nunchuk buttons
+    if (cBtn)
+        _buttonState = (ButtonState)((int)_buttonState | BUTTON_C);
+    if (zBtn)
+        _buttonState = (ButtonState)((int)_buttonState | BUTTON_Z);
+
+    // check button change
+    if (_filter & FILTER_BUTTON) {
         ; // ignore
-      }
-      else if (_buttonState != _oldButtonState) {
+    }
+    else if (_buttonState != _oldButtonState) {
         buttonIsChanged = true;
-      }
+    }
 
-      // check nunchuk stick change
-      int nunchukStickIsChanged = false;
-      int nunXStickDelta = (int)(_pNunchukState->xStick) - _pOldNunchukState->xStick;
-      int nunYStickDelta = (int)(_pNunchukState->yStick) - _pOldNunchukState->yStick;
-      int nunStickDelta = (nunXStickDelta*nunXStickDelta + nunYStickDelta*nunYStickDelta) / 2;
-      if (_filter & FILTER_NUNCHUK_STICK) {
-        ; // ignore
-      }
-      else if (nunStickDelta >= _nunStickThreshold) {
-        nunchukStickIsChanged = true;
-      }
+    // check nunchuk stick change
+    if (offs)
+    {
+        int nunXStickDelta = (int)(_nunchukState.xStick) - _oldNunchukState.xStick;
+        int nunYStickDelta = (int)(_nunchukState.yStick) - _oldNunchukState.yStick;
+        int nunStickDelta = (nunXStickDelta*nunXStickDelta + nunYStickDelta*nunYStickDelta);
+        if (_filter & FILTER_NUNCHUK_STICK) {
+            ; // ignore
+        }
+        else if (nunStickDelta >= _nunStickThreshold) {
+            nunchukStickIsChanged = true;
+        }
 
-      // check nunchuk button change
-      int nunchukButtonIsChanged = false;
-      if (_filter & FILTER_NUNCHUK_BUTTON) {
-        ; // ignore
-      }
-      else if (
-        (_pNunchukState->cBtn != _pOldNunchukState->cBtn)
-        || (_pNunchukState->zBtn != _pOldNunchukState->zBtn)
-      ) {
-        nunchukButtonIsChanged = true;
-      }
+//      // check nunchuk button change
+//      if (_filter & FILTER_NUNCHUK_BUTTON) {
+//          ; // ignore
+//      }
+//      else if (
+//        (_pNunchukState->cBtn != _pOldNunchukState->cBtn)
+//        || (_pNunchukState->zBtn != _pOldNunchukState->zBtn)
+//        ) {
+//          nunchukButtonIsChanged = true;
+//      }
 
-      // check accel change
-      int accelIsChanged = false;
-      if (_filter & FILTER_NUNCHUK_ACCEL) {
-        ; // ignore
-      }
-      else {
-        accelIsChanged = true;
-      }
+        // check accel change
+        if (_filter & FILTER_ACCEL) {
+            ; // ignore
+        }
+        else {
+            accelIsChanged = true;
+        }
+    }
 
-      stateIsAvailable = 
+    return
         ( buttonIsChanged
         | nunchukStickIsChanged
-        | nunchukButtonIsChanged
+//      | nunchukButtonIsChanged
         | accelIsChanged
         );
-
-    }
-    return stateIsAvailable;
 }
 
-uint16_t ESP32Wiimote::getButtonState(void)
+ButtonState ESP32Wiimote::getButtonState(void)
 {
   return _buttonState;
 }
 
+AccelState ESP32Wiimote::getAccelState(void)
+{
+    return _accelState;
+}
+
 NunchukState ESP32Wiimote::getNunchukState(void)
 {
-  return *_pNunchukState;
+  return _nunchukState;
 }
 
 void ESP32Wiimote::addFilter(int action, int filter) {
   if (action == ACTION_IGNORE) {
     _filter = _filter | filter;
+
+    if (filter & FILTER_ACCEL)
+      TinyWiimoteReqAccelerometer(false);
   }
 }
 
